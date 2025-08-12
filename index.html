@@ -1,122 +1,158 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Infinite Bus Drive</title>
-  <style>
-    body { margin:0; overflow:hidden; background:#333; }
-    canvas { background:#555; display:block; margin:0 auto; }
-  </style>
+<meta charset="utf-8" />
+<title>Simple 3D Bus Driving</title>
+<style>
+  body { margin: 0; overflow: hidden; }
+  canvas { display: block; }
+</style>
 </head>
 <body>
-<canvas id="game"></canvas>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"></script>
 <script>
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-canvas.width = 400;
-canvas.height = 600;
 
-let bus = {
-  x: canvas.width / 2 - 25,
-  y: canvas.height - 120,
-  width: 50,
-  height: 100,
-  speed: 0,
-  maxSpeed: 5,
-  angle: 0,
-  steerSpeed: 0.05,
+let scene, camera, renderer;
+let world, vehicleBody, vehicle;
+let chassisMesh, wheelMeshes = [];
+let clock = new THREE.Clock();
+
+init();
+animate();
+
+function init() {
+  // Scene setup
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x88ccee);
+
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 5, 10);
+
+  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // Cannon physics world
+  world = new CANNON.World();
+  world.gravity.set(0, -9.82, 0);
+
+  // Ground
+  let groundBody = new CANNON.Body({ mass: 0 });
+  let groundShape = new CANNON.Plane();
+  groundBody.addShape(groundShape);
+  groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+  world.addBody(groundBody);
+
+  let groundGeo = new THREE.PlaneGeometry(1000, 1000);
+  let groundMat = new THREE.MeshPhongMaterial({ color: 0x006600 });
+  let groundMesh = new THREE.Mesh(groundGeo, groundMat);
+  groundMesh.rotation.x = -Math.PI / 2;
+  scene.add(groundMesh);
+
+  // Lights
+  let hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+  hemiLight.position.set(0, 20, 0);
+  scene.add(hemiLight);
+  let dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(5, 10, 7);
+  scene.add(dirLight);
+
+  // Vehicle chassis
+  let chassisShape = new CANNON.Box(new CANNON.Vec3(1, 0.5, 2));
+  vehicleBody = new CANNON.Body({ mass: 150 });
+  vehicleBody.addShape(chassisShape);
+  vehicleBody.position.set(0, 1, 0);
+  world.addBody(vehicleBody);
+
+  // Visual chassis
+  let chassisGeo = new THREE.BoxGeometry(2, 1, 4);
+  let chassisMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
+  chassisMesh = new THREE.Mesh(chassisGeo, chassisMat);
+  scene.add(chassisMesh);
+
+  // Vehicle wheels - simple spheres for demo
+  let wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.2, 16);
+  let wheelMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+  for (let i = 0; i < 4; i++) {
+    let wheelMesh = new THREE.Mesh(wheelGeo, wheelMat);
+    wheelMesh.rotation.z = Math.PI / 2;
+    scene.add(wheelMesh);
+    wheelMeshes.push(wheelMesh);
+  }
+
+  // Add controls
+  window.addEventListener('keydown', keydown);
+  window.addEventListener('keyup', keyup);
+
+  // Set up simple vehicle physics later or just move chassis for demo
+}
+
+let controls = {
+  forward: false,
+  backward: false,
+  left: false,
+  right: false,
 };
 
-let keys = {};
-document.addEventListener('keydown', e => keys[e.key] = true);
-document.addEventListener('keyup', e => keys[e.key] = false);
-
-let road = {
-  laneWidth: 100,
-  lanes: 3,
-  offsetY: 0,
-  speed: 3,
-};
-
-function drawBus() {
-  ctx.save();
-  ctx.translate(bus.x + bus.width / 2, bus.y + bus.height / 2);
-  ctx.rotate(bus.angle);
-  ctx.fillStyle = 'yellow';
-  ctx.fillRect(-bus.width / 2, -bus.height / 2, bus.width, bus.height);
-  // Windows
-  ctx.fillStyle = 'lightblue';
-  ctx.fillRect(-20, -30, 40, 40);
-  ctx.restore();
+function keydown(e) {
+  switch (e.code) {
+    case 'ArrowUp': controls.forward = true; break;
+    case 'ArrowDown': controls.backward = true; break;
+    case 'ArrowLeft': controls.left = true; break;
+    case 'ArrowRight': controls.right = true; break;
+  }
 }
 
-function drawRoad() {
-  ctx.fillStyle = '#333';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Draw road sides
-  ctx.fillStyle = '#444';
-  ctx.fillRect(canvas.width/2 - road.laneWidth*road.lanes/2 - 20, 0, 20, canvas.height);
-  ctx.fillRect(canvas.width/2 + road.laneWidth*road.lanes/2, 0, 20, canvas.height);
-
-  // Draw lanes
-  ctx.strokeStyle = 'white';
-  ctx.lineWidth = 4;
-  ctx.setLineDash([20, 20]);
-
-  for(let i = 1; i < road.lanes; i++) {
-    let x = canvas.width/2 - road.laneWidth*road.lanes/2 + i*road.laneWidth;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
-    ctx.stroke();
+function keyup(e) {
+  switch (e.code) {
+    case 'ArrowUp': controls.forward = false; break;
+    case 'ArrowDown': controls.backward = false; break;
+    case 'ArrowLeft': controls.left = false; break;
+    case 'ArrowRight': controls.right = false; break;
   }
-  ctx.setLineDash([]);
-
-  // Draw moving dashed center line
-  ctx.strokeStyle = 'yellow';
-  ctx.lineWidth = 6;
-  ctx.setLineDash([30, 30]);
-  ctx.beginPath();
-  let centerX = canvas.width / 2;
-  for(let y = -road.offsetY % 60; y < canvas.height; y += 60) {
-    ctx.moveTo(centerX, y);
-    ctx.lineTo(centerX, y + 30);
-  }
-  ctx.stroke();
-  ctx.setLineDash([]);
 }
 
-function update() {
-  // Handle steering left/right
-  if(keys['ArrowLeft'] || keys['a']) {
-    bus.angle -= bus.steerSpeed;
-    bus.x -= 5 * Math.cos(bus.angle);
+function animate() {
+  requestAnimationFrame(animate);
+  let dt = clock.getDelta();
+
+  // Simple manual physics
+  let velocity = new CANNON.Vec3();
+
+  if (controls.forward) velocity.z -= 5;
+  if (controls.backward) velocity.z += 5;
+  if (controls.left) vehicleBody.quaternion.setFromEuler(0, vehicleBody.quaternion.toEuler().y + dt * 2, 0);
+  if (controls.right) vehicleBody.quaternion.setFromEuler(0, vehicleBody.quaternion.toEuler().y - dt * 2, 0);
+
+  vehicleBody.velocity.x = velocity.x;
+  vehicleBody.velocity.z = velocity.z;
+
+  world.step(dt);
+
+  // Update visuals
+  chassisMesh.position.copy(vehicleBody.position);
+  chassisMesh.quaternion.copy(vehicleBody.quaternion);
+
+  // Update wheels position roughly
+  let wheelPositions = [
+    new THREE.Vector3(-1, -0.5, 1.5),
+    new THREE.Vector3(1, -0.5, 1.5),
+    new THREE.Vector3(-1, -0.5, -1.5),
+    new THREE.Vector3(1, -0.5, -1.5),
+  ];
+  for (let i = 0; i < 4; i++) {
+    wheelMeshes[i].position.copy(chassisMesh.position).add(wheelPositions[i]);
+    wheelMeshes[i].quaternion.copy(chassisMesh.quaternion);
   }
-  if(keys['ArrowRight'] || keys['d']) {
-    bus.angle += bus.steerSpeed;
-    bus.x += 5 * Math.cos(bus.angle);
-  }
 
-  // Keep bus within road bounds
-  let roadLeft = canvas.width/2 - road.laneWidth*road.lanes/2 + 10;
-  let roadRight = canvas.width/2 + road.laneWidth*road.lanes/2 - bus.width - 10;
-  if(bus.x < roadLeft) bus.x = roadLeft;
-  if(bus.x > roadRight) bus.x = roadRight;
+  // Camera follows vehicle
+  let camOffset = new THREE.Vector3(0, 5, 10).applyQuaternion(chassisMesh.quaternion);
+  camera.position.copy(chassisMesh.position).add(camOffset);
+  camera.lookAt(chassisMesh.position);
 
-  // Move road (simulate driving forward)
-  road.offsetY += road.speed;
-  if(road.offsetY > 60) road.offsetY = 0;
+  renderer.render(scene, camera);
 }
-
-function loop() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawRoad();
-  update();
-  drawBus();
-  requestAnimationFrame(loop);
-}
-
-loop();
 </script>
 </body>
 </html>
