@@ -1,158 +1,167 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<title>Simple 3D Bus Driving</title>
+<meta charset="UTF-8" />
+<title>3D Bus Driving Demo</title>
 <style>
   body { margin: 0; overflow: hidden; }
   canvas { display: block; }
+  #info {
+    position: absolute; top: 10px; left: 10px;
+    background: rgba(0,0,0,0.5); color: white; padding: 10px;
+    font-family: sans-serif; z-index: 1;
+  }
 </style>
 </head>
 <body>
+<div id="info">
+  Use Arrow keys or WASD to drive the bus.
+</div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"></script>
+
 <script>
+  let scene, camera, renderer;
+  let world, vehicleBody;
+  let chassisMesh, wheelMeshes = [];
+  let clock = new THREE.Clock();
 
-let scene, camera, renderer;
-let world, vehicleBody, vehicle;
-let chassisMesh, wheelMeshes = [];
-let clock = new THREE.Clock();
+  // Controls state
+  let controls = { forward: false, backward: false, left: false, right: false };
 
-init();
-animate();
+  init();
+  animate();
 
-function init() {
-  // Scene setup
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x88ccee);
+  function init() {
+    // Scene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb); // sky blue
 
-  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 5, 10);
+    // Camera
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 5, 10);
 
-  renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+    // Renderer
+    renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
 
-  // Cannon physics world
-  world = new CANNON.World();
-  world.gravity.set(0, -9.82, 0);
+    // Lighting
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambient);
+    const directional = new THREE.DirectionalLight(0xffffff, 0.7);
+    directional.position.set(5, 10, 7);
+    scene.add(directional);
 
-  // Ground
-  let groundBody = new CANNON.Body({ mass: 0 });
-  let groundShape = new CANNON.Plane();
-  groundBody.addShape(groundShape);
-  groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-  world.addBody(groundBody);
+    // Physics world
+    world = new CANNON.World();
+    world.gravity.set(0, -9.82, 0);
 
-  let groundGeo = new THREE.PlaneGeometry(1000, 1000);
-  let groundMat = new THREE.MeshPhongMaterial({ color: 0x006600 });
-  let groundMesh = new THREE.Mesh(groundGeo, groundMat);
-  groundMesh.rotation.x = -Math.PI / 2;
-  scene.add(groundMesh);
+    // Ground plane
+    const groundBody = new CANNON.Body({ mass: 0 });
+    groundBody.addShape(new CANNON.Plane());
+    groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+    world.addBody(groundBody);
 
-  // Lights
-  let hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
-  hemiLight.position.set(0, 20, 0);
-  scene.add(hemiLight);
-  let dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  dirLight.position.set(5, 10, 7);
-  scene.add(dirLight);
+    // Visual ground
+    const groundGeo = new THREE.PlaneGeometry(1000, 1000);
+    const groundMat = new THREE.MeshPhongMaterial({ color: 0x228822 });
+    const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+    groundMesh.rotation.x = -Math.PI/2;
+    scene.add(groundMesh);
 
-  // Vehicle chassis
-  let chassisShape = new CANNON.Box(new CANNON.Vec3(1, 0.5, 2));
-  vehicleBody = new CANNON.Body({ mass: 150 });
-  vehicleBody.addShape(chassisShape);
-  vehicleBody.position.set(0, 1, 0);
-  world.addBody(vehicleBody);
+    // Vehicle chassis physics
+    const chassisShape = new CANNON.Box(new CANNON.Vec3(1, 0.5, 2));
+    vehicleBody = new CANNON.Body({ mass: 150 });
+    vehicleBody.addShape(chassisShape);
+    vehicleBody.position.set(0, 1, 0);
+    world.addBody(vehicleBody);
 
-  // Visual chassis
-  let chassisGeo = new THREE.BoxGeometry(2, 1, 4);
-  let chassisMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
-  chassisMesh = new THREE.Mesh(chassisGeo, chassisMat);
-  scene.add(chassisMesh);
+    // Visual chassis (simple yellow box as bus)
+    const chassisGeo = new THREE.BoxGeometry(2, 1, 4);
+    const chassisMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
+    chassisMesh = new THREE.Mesh(chassisGeo, chassisMat);
+    scene.add(chassisMesh);
 
-  // Vehicle wheels - simple spheres for demo
-  let wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.2, 16);
-  let wheelMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
-  for (let i = 0; i < 4; i++) {
-    let wheelMesh = new THREE.Mesh(wheelGeo, wheelMat);
-    wheelMesh.rotation.z = Math.PI / 2;
-    scene.add(wheelMesh);
-    wheelMeshes.push(wheelMesh);
+    // Wheels - simple black cylinders
+    const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.2, 16);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+    for (let i = 0; i < 4; i++) {
+      const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+      wheel.rotation.z = Math.PI / 2;
+      scene.add(wheel);
+      wheelMeshes.push(wheel);
+    }
+
+    // Window resize
+    window.addEventListener('resize', onWindowResize);
+
+    // Keyboard controls
+    window.addEventListener('keydown', e => {
+      if(e.code === 'ArrowUp' || e.key.toLowerCase() === 'w') controls.forward = true;
+      if(e.code === 'ArrowDown' || e.key.toLowerCase() === 's') controls.backward = true;
+      if(e.code === 'ArrowLeft' || e.key.toLowerCase() === 'a') controls.left = true;
+      if(e.code === 'ArrowRight' || e.key.toLowerCase() === 'd') controls.right = true;
+    });
+    window.addEventListener('keyup', e => {
+      if(e.code === 'ArrowUp' || e.key.toLowerCase() === 'w') controls.forward = false;
+      if(e.code === 'ArrowDown' || e.key.toLowerCase() === 's') controls.backward = false;
+      if(e.code === 'ArrowLeft' || e.key.toLowerCase() === 'a') controls.left = false;
+      if(e.code === 'ArrowRight' || e.key.toLowerCase() === 'd') controls.right = false;
+    });
   }
 
-  // Add controls
-  window.addEventListener('keydown', keydown);
-  window.addEventListener('keyup', keyup);
-
-  // Set up simple vehicle physics later or just move chassis for demo
-}
-
-let controls = {
-  forward: false,
-  backward: false,
-  left: false,
-  right: false,
-};
-
-function keydown(e) {
-  switch (e.code) {
-    case 'ArrowUp': controls.forward = true; break;
-    case 'ArrowDown': controls.backward = true; break;
-    case 'ArrowLeft': controls.left = true; break;
-    case 'ArrowRight': controls.right = true; break;
-  }
-}
-
-function keyup(e) {
-  switch (e.code) {
-    case 'ArrowUp': controls.forward = false; break;
-    case 'ArrowDown': controls.backward = false; break;
-    case 'ArrowLeft': controls.left = false; break;
-    case 'ArrowRight': controls.right = false; break;
-  }
-}
-
-function animate() {
-  requestAnimationFrame(animate);
-  let dt = clock.getDelta();
-
-  // Simple manual physics
-  let velocity = new CANNON.Vec3();
-
-  if (controls.forward) velocity.z -= 5;
-  if (controls.backward) velocity.z += 5;
-  if (controls.left) vehicleBody.quaternion.setFromEuler(0, vehicleBody.quaternion.toEuler().y + dt * 2, 0);
-  if (controls.right) vehicleBody.quaternion.setFromEuler(0, vehicleBody.quaternion.toEuler().y - dt * 2, 0);
-
-  vehicleBody.velocity.x = velocity.x;
-  vehicleBody.velocity.z = velocity.z;
-
-  world.step(dt);
-
-  // Update visuals
-  chassisMesh.position.copy(vehicleBody.position);
-  chassisMesh.quaternion.copy(vehicleBody.quaternion);
-
-  // Update wheels position roughly
-  let wheelPositions = [
-    new THREE.Vector3(-1, -0.5, 1.5),
-    new THREE.Vector3(1, -0.5, 1.5),
-    new THREE.Vector3(-1, -0.5, -1.5),
-    new THREE.Vector3(1, -0.5, -1.5),
-  ];
-  for (let i = 0; i < 4; i++) {
-    wheelMeshes[i].position.copy(chassisMesh.position).add(wheelPositions[i]);
-    wheelMeshes[i].quaternion.copy(chassisMesh.quaternion);
+  function onWindowResize() {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  // Camera follows vehicle
-  let camOffset = new THREE.Vector3(0, 5, 10).applyQuaternion(chassisMesh.quaternion);
-  camera.position.copy(chassisMesh.position).add(camOffset);
-  camera.lookAt(chassisMesh.position);
+  function animate() {
+    requestAnimationFrame(animate);
 
-  renderer.render(scene, camera);
-}
+    let dt = clock.getDelta();
+
+    // Simple vehicle control logic
+    let force = 0;
+    if (controls.forward) force = -200;
+    else if (controls.backward) force = 100;
+
+    // Steering
+    if (controls.left) vehicleBody.quaternion.setFromEuler(0, vehicleBody.quaternion.toEuler().y + dt*2, 0);
+    if (controls.right) vehicleBody.quaternion.setFromEuler(0, vehicleBody.quaternion.toEuler().y - dt*2, 0);
+
+    // Apply forward/backward force in vehicle local forward direction
+    const forwardVec = new CANNON.Vec3(0, 0, force);
+    const worldForce = vehicleBody.quaternion.vmult(forwardVec);
+    vehicleBody.applyForce(worldForce, vehicleBody.position);
+
+    // Step physics world
+    world.step(dt);
+
+    // Sync visuals
+    chassisMesh.position.copy(vehicleBody.position);
+    chassisMesh.quaternion.copy(vehicleBody.quaternion);
+
+    // Position wheels roughly at corners of chassis
+    const wheelOffsets = [
+      new THREE.Vector3(-1, -0.5,  1.5),
+      new THREE.Vector3( 1, -0.5,  1.5),
+      new THREE.Vector3(-1, -0.5, -1.5),
+      new THREE.Vector3( 1, -0.5, -1.5),
+    ];
+    for(let i=0; i<4; i++) {
+      wheelMeshes[i].position.copy(chassisMesh.position).add(wheelOffsets[i].applyQuaternion(chassisMesh.quaternion));
+      wheelMeshes[i].quaternion.copy(chassisMesh.quaternion);
+    }
+
+    // Camera follows behind and above the bus
+    const camOffset = new THREE.Vector3(0, 5, 10).applyQuaternion(chassisMesh.quaternion);
+    camera.position.copy(chassisMesh.position).add(camOffset);
+    camera.lookAt(chassisMesh.position);
+
+    renderer.render(scene, camera);
+  }
 </script>
 </body>
 </html>
