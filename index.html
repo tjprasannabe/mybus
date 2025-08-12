@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Infinite Bus Drive</title>
+  <style>
+    body { margin:0; overflow:hidden; background:#333; }
+    canvas { background:#555; display:block; margin:0 auto; }
+  </style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = 400;
+canvas.height = 600;
+
+let bus = {
+  x: canvas.width / 2 - 25,
+  y: canvas.height - 120,
+  width: 50,
+  height: 100,
+  speed: 0,
+  maxSpeed: 5,
+  angle: 0,
+  steerSpeed: 0.05,
+};
+
+let keys = {};
+document.addEventListener('keydown', e => keys[e.key] = true);
+document.addEventListener('keyup', e => keys[e.key] = false);
+
+let road = {
+  laneWidth: 100,
+  lanes: 3,
+  offsetY: 0,
+  speed: 3,
+};
+
+function drawBus() {
+  ctx.save();
+  ctx.translate(bus.x + bus.width / 2, bus.y + bus.height / 2);
+  ctx.rotate(bus.angle);
+  ctx.fillStyle = 'yellow';
+  ctx.fillRect(-bus.width / 2, -bus.height / 2, bus.width, bus.height);
+  // Windows
+  ctx.fillStyle = 'lightblue';
+  ctx.fillRect(-20, -30, 40, 40);
+  ctx.restore();
+}
+
+function drawRoad() {
+  ctx.fillStyle = '#333';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw road sides
+  ctx.fillStyle = '#444';
+  ctx.fillRect(canvas.width/2 - road.laneWidth*road.lanes/2 - 20, 0, 20, canvas.height);
+  ctx.fillRect(canvas.width/2 + road.laneWidth*road.lanes/2, 0, 20, canvas.height);
+
+  // Draw lanes
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 4;
+  ctx.setLineDash([20, 20]);
+
+  for(let i = 1; i < road.lanes; i++) {
+    let x = canvas.width/2 - road.laneWidth*road.lanes/2 + i*road.laneWidth;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, canvas.height);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Draw moving dashed center line
+  ctx.strokeStyle = 'yellow';
+  ctx.lineWidth = 6;
+  ctx.setLineDash([30, 30]);
+  ctx.beginPath();
+  let centerX = canvas.width / 2;
+  for(let y = -road.offsetY % 60; y < canvas.height; y += 60) {
+    ctx.moveTo(centerX, y);
+    ctx.lineTo(centerX, y + 30);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function update() {
+  // Handle steering left/right
+  if(keys['ArrowLeft'] || keys['a']) {
+    bus.angle -= bus.steerSpeed;
+    bus.x -= 5 * Math.cos(bus.angle);
+  }
+  if(keys['ArrowRight'] || keys['d']) {
+    bus.angle += bus.steerSpeed;
+    bus.x += 5 * Math.cos(bus.angle);
+  }
+
+  // Keep bus within road bounds
+  let roadLeft = canvas.width/2 - road.laneWidth*road.lanes/2 + 10;
+  let roadRight = canvas.width/2 + road.laneWidth*road.lanes/2 - bus.width - 10;
+  if(bus.x < roadLeft) bus.x = roadLeft;
+  if(bus.x > roadRight) bus.x = roadRight;
+
+  // Move road (simulate driving forward)
+  road.offsetY += road.speed;
+  if(road.offsetY > 60) road.offsetY = 0;
+}
+
+function loop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawRoad();
+  update();
+  drawBus();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
